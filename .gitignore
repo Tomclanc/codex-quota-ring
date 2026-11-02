@@ -1,0 +1,15 @@
+bin/
+obj/
+app/
+dist/
+*.user
+*.lnk
+settings.json
+check.json
+tests.txt
+position-status.txt
+window-status.txt
+preview.png
+menu-preview.png
+ui-preview.png
+!docs/ui-preview.png
