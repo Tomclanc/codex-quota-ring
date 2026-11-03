@@ -12,8 +12,8 @@ using System.Windows.Threading;
 namespace CodexQuotaRing;
 public class Settings
 {
-    public double CenterX { get; set; } = 32;
-    public double Bottom { get; set; } = 68;
+    public double CenterX { get; set; } = 80;
+    public double Bottom { get; set; } = 24;
     public double Size { get; set; } = 38;
     public string Center { get; set; } = "min";
 }
@@ -21,6 +21,20 @@ public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if (args.Contains("--watch"))
+        {
+            using var watcher = new Mutex(true, "Local\\CodexQuotaRing.Watcher.v1", out bool firstWatcher);
+            if (!firstWatcher) return;
+            while (true)
+            {
+                using var child = Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true });
+                if (child == null) return;
+                child.WaitForExit();
+                // Explicit menu exit stops recovery until the next launch/login.
+                if (child.ExitCode == 42) return;
+                Thread.Sleep(3000);
+            }
+        }
         if (args.Contains("--gallery")) { Gallery.Render(); return; }
         if (args.Contains("--menu-preview"))
         {
@@ -95,6 +109,8 @@ public class RingWindow : Window
     {
         this.preview = preview;
         try { settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(config)) ?? new(); } catch { settings = new(); }
+        // Migrate the old default only; preserve deliberately customized positions.
+        if (settings.CenterX == 32 && settings.Bottom == 68) { settings.CenterX = 80; settings.Bottom = 24; }
         settings.Size = Math.Clamp(settings.Size, 32, 56);
         Title = "Codex 额度环"; Width = Height = settings.Size;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true;
@@ -111,8 +127,8 @@ public class RingWindow : Window
         Add("位置向下微调", () => { settings.Bottom -= 2; Save(); });
         Add("位置向左微调", () => { settings.CenterX -= 2; Save(); });
         Add("位置向右微调", () => { settings.CenterX += 2; Save(); });
-        Add("恢复默认位置", () => { settings.CenterX = 32; settings.Bottom = 68; Save(); });
-        menu.Items.Add(new Separator()); Add("退出额度环", () => { cancel.Cancel(); timer.Stop(); Close(); Application.Current.Shutdown(); });
+        Add("恢复默认位置", () => { settings.CenterX = 80; settings.Bottom = 24; Save(); });
+        menu.Items.Add(new Separator()); Add("退出额度环", () => { Environment.ExitCode = 42; cancel.Cancel(); timer.Stop(); Close(); Application.Current.Shutdown(42); });
         visual.MouseRightButtonUp += (_, e) =>
         {
             e.Handled = true; HideTip();
@@ -127,6 +143,7 @@ public class RingWindow : Window
         SetWindowLongPtr(handle, -20, new IntPtr(GetWindowLongPtr(handle, -20).ToInt64() | 0x08000000L | 0x80L));
         HwndSource.FromHwnd(handle)?.AddHook((IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled) => { if (msg == 0x21) { handled = true; return new IntPtr(3); } return IntPtr.Zero; });
         timer.Tick += (_, _) => Tick(); timer.Start();
+        Closed += (_, _) => { cancel.Cancel(); timer.Stop(); Application.Current.Shutdown(Environment.ExitCode); };
         if (preview) { quota = new(new(72, 0), new(86, 0)); error = "预览数据"; updated = DateTime.Now; Left = 200; Top = 200; Show(); }
     }
     void Save() { try { File.WriteAllText(config, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); } catch { } Render(); }
