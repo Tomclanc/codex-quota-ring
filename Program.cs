@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -103,6 +104,9 @@ public class RingWindow : Window
     Quota quota = new(null, null);
     DateTime next, updated;
     bool busy, stale;
+    bool pointerDown, dragging;
+    Point dragStart;
+    double dragCenterX, dragBottom;
     string error = "正在读取额度…";
     readonly string config = Path.Combine(AppContext.BaseDirectory, "settings.json");
     public RingWindow(bool preview)
@@ -136,8 +140,40 @@ public class RingWindow : Window
             flyout = new MicaMenu(menu, settings.Center);
             flyout.OpenAt(visual.PointToScreen(new Point(ActualWidth + 6, ActualHeight)));
         };
-        visual.MouseLeftButtonUp += (_, _) => { if (tip?.IsVisible == true) HideTip(); else UpdateTip(); };
-        visual.MouseEnter += (_, _) => { if (flyout?.IsVisible != true) UpdateTip(); };
+        visual.MouseLeftButtonDown += (_, e) =>
+        {
+            if (preview) return;
+            dragStart = visual.PointToScreen(e.GetPosition(visual));
+            dragCenterX = settings.CenterX; dragBottom = settings.Bottom;
+            pointerDown = visual.CaptureMouse(); dragging = false;
+            flyout?.Close(); flyout = null;
+            e.Handled = true;
+        };
+        visual.MouseMove += (_, e) =>
+        {
+            if (!pointerDown) return;
+            if (e.LeftButton != MouseButtonState.Pressed) { FinishDrag(); return; }
+            if (!GetClientRect(codexWindow, out var bounds)) { FinishDrag(); return; }
+            double scale = GetDpiForWindow(codexWindow) / 96.0;
+            if (scale <= 0) return;
+            var delta = (visual.PointToScreen(e.GetPosition(visual)) - dragStart) / scale;
+            if (!dragging && Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+            dragging = true; HideTip(); visual.Cursor = Cursors.SizeAll;
+            double half = settings.Size / 2;
+            settings.CenterX = Math.Clamp(dragCenterX + delta.X, half, Math.Max(half, bounds.Right / scale - half));
+            settings.Bottom = Math.Clamp(dragBottom - delta.Y, half, Math.Max(half, bounds.Bottom / scale - half));
+            Tick();
+            e.Handled = true;
+        };
+        visual.MouseLeftButtonUp += (_, e) =>
+        {
+            bool wasDragging = dragging;
+            FinishDrag();
+            if (!wasDragging) { if (tip?.IsVisible == true) HideTip(); else UpdateTip(); }
+            e.Handled = true;
+        };
+        visual.LostMouseCapture += (_, _) => FinishDrag();
+        visual.MouseEnter += (_, _) => { if (!pointerDown && flyout?.IsVisible != true) UpdateTip(); };
         visual.MouseLeave += (_, _) => HideTip();
         handle = new WindowInteropHelper(this).EnsureHandle();
         SetWindowLongPtr(handle, -20, new IntPtr(GetWindowLongPtr(handle, -20).ToInt64() | 0x08000000L | 0x80L));
@@ -147,6 +183,13 @@ public class RingWindow : Window
         if (preview) { quota = new(new(72, 0), new(86, 0)); error = "预览数据"; updated = DateTime.Now; Left = 200; Top = 200; Show(); }
     }
     void Save() { try { File.WriteAllText(config, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); } catch { } Render(); }
+    void FinishDrag()
+    {
+        bool save = dragging;
+        pointerDown = false; dragging = false; visual.Cursor = null;
+        if (visual.IsMouseCaptured) visual.ReleaseMouseCapture();
+        if (save) Save();
+    }
     bool IsCodex(IntPtr hwnd)
     {
         GetWindowThreadProcessId(hwnd, out uint pid);
@@ -196,7 +239,7 @@ public class RingWindow : Window
                 if (!IsVisible) Show();
                 SetWindowPos(handle, IntPtr.Zero, x, y, size, size, 0x54);
             }
-            else { HideTip(); flyout?.Close(); flyout = null; Hide(); }
+            else { FinishDrag(); HideTip(); flyout?.Close(); flyout = null; Hide(); }
             if (!busy && DateTime.UtcNow >= next) _ = Refresh();
         }
         Render();
@@ -239,7 +282,7 @@ public class RingWindow : Window
         AddLimit("每周 · 外环", quota.Week, "#20A77A"); AddLimit("5 小时 · 内环", quota.FiveHour, "#478CE8");
         panel.Children.Add(new Border { Height = 1, Background = Brushes.Gray, Opacity = .2, Margin = new Thickness(0,0,0,10) });
         panel.Children.Add(new TextBlock { Text = (stale ? "旧数据 · " : "") + (error.Length > 0 ? error : "更新于 " + updated.ToString("HH:mm:ss") + " · 每 60 秒刷新"), FontSize = 11, Opacity = .65, TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(new TextBlock { Text = "右键调整显示与位置", FontSize = 11, Opacity = .5, Margin = new Thickness(0,4,0,0) });
+        panel.Children.Add(new TextBlock { Text = "左键拖动位置 · 右键设置", FontSize = 11, Opacity = .5, Margin = new Thickness(0,4,0,0) });
         return panel;
     }
     void HideTip() { var old = tip; tip = null; old?.Close(); }
