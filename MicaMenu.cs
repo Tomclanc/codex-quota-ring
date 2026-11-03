@@ -22,6 +22,19 @@ public sealed class MicaMenu : Window
     readonly Border surface;
     readonly bool dark;
     bool passive;
+    bool closingOrClosed;
+    public new void Close()
+    {
+        if (closingOrClosed) return;
+        closingOrClosed = true;
+        base.Close();
+    }
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        closingOrClosed = true;
+        base.OnClosing(e);
+        if (e.Cancel) closingOrClosed = false;
+    }
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
     public MicaMenu(FrameworkElement details) : this(new ContextMenu(), "min")

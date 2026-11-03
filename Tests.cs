@@ -7,6 +7,13 @@ static class Tests
     {
         Quota Parse(string s) { using var d = JsonDocument.Parse(s); return QuotaClient.Parse(d.RootElement); }
         void Check(bool ok) { if (!ok) throw new Exception("Quota parser test failed"); }
+        var menu = new MicaMenu(new System.Windows.Controls.ContextMenu(), "min");
+        int closed = 0;
+        menu.Closing += (_, _) => menu.Close();
+        menu.Closed += (_, _) => closed++;
+        new System.Windows.Interop.WindowInteropHelper(menu).EnsureHandle();
+        menu.Close(); menu.Close();
+        Check(closed == 1);
         var a = Parse("""{"rateLimits":{"primary":{"usedPercent":18,"windowDurationMins":300},"secondary":{"usedPercent":67,"windowDurationMins":10080}}}""");
         Check(a.Week?.Remaining == 33 && a.FiveHour?.Remaining == 82);
         var b = Parse("""{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":100,"windowDurationMins":10080},"secondary":null},"spark":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}""");
@@ -15,6 +22,6 @@ static class Tests
         Check(c.Week == null && c.FiveHour == null);
         var d = Parse("""{"rateLimits":{"primary":{"usedPercent":null,"windowDurationMins":300}}}""");
         Check(d.FiveHour == null);
-        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"tests.txt"),"PASS: swapped/legacy windows, multi-bucket selection, missing windows, unknown durations, null usage.");
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"tests.txt"),"PASS: reentrant and repeated menu close; swapped/legacy windows, multi-bucket selection, missing windows, unknown durations, null usage.");
     }
 }
