@@ -12,6 +12,14 @@ static class Tests
         menu.Closing += (_, _) => menu.Close();
         menu.Closed += (_, _) => closed++;
         new System.Windows.Interop.WindowInteropHelper(menu).EnsureHandle();
+        var sharedForeground = menu.Foreground;
+        Theme.Mode = "dark"; Theme.Refresh(true);
+        Check(Theme.Dark && ReferenceEquals(menu.Foreground, sharedForeground) && Theme.Foreground.Color.R > 200);
+        Theme.Mode = "light"; Theme.Refresh(true);
+        Check(!Theme.Dark && ReferenceEquals(menu.Foreground, sharedForeground) && Theme.Foreground.Color.R < 60);
+        var appearance = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(new Settings { Appearance = "dark" }));
+        Check(appearance?.Appearance == "dark");
+        Theme.Mode = "system"; Theme.Refresh(true);
         menu.Close(); menu.Close();
         Check(closed == 1);
         var a = Parse("""{"rateLimits":{"primary":{"usedPercent":18,"windowDurationMins":300},"secondary":{"usedPercent":67,"windowDurationMins":10080}}}""");
@@ -22,6 +30,6 @@ static class Tests
         Check(c.Week == null && c.FiveHour == null);
         var d = Parse("""{"rateLimits":{"primary":{"usedPercent":null,"windowDurationMins":300}}}""");
         Check(d.FiveHour == null);
-        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"tests.txt"),"PASS: reentrant and repeated menu close; swapped/legacy windows, multi-bucket selection, missing windows, unknown durations, null usage.");
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"tests.txt"),"PASS: live dark/light theme switch and preference persistence; reentrant and repeated menu close; swapped/legacy windows, multi-bucket selection, missing windows, unknown durations, null usage.");
     }
 }

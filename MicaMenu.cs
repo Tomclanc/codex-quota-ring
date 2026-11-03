@@ -20,7 +20,8 @@ public sealed class MicaMenu : Window
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left,Top,Right,Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int Size; public RECT Monitor,Work; public uint Flags; }
     readonly Border surface;
-    readonly bool dark;
+    bool dark => Theme.Dark;
+    bool micaAvailable;
     bool passive;
     bool closingOrClosed;
     public new void Close()
@@ -50,27 +51,27 @@ public sealed class MicaMenu : Window
     }
     public MicaMenu(ContextMenu commands, string selected)
     {
-        dark = (int?)Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0;
+        Theme.Refresh();
+        Resources["ThemeHover"] = Theme.Hover;
         Title = "额度环设置"; Width = 258; SizeToContent = SizeToContent.Height;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false; Topmost = true; Background = Brushes.Transparent;
         WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 0, ResizeBorderThickness = new Thickness(0), GlassFrameThickness = new Thickness(-1), CornerRadius = new CornerRadius(12), UseAeroCaptionButtons = false });
-        var foreground = new SolidColorBrush(dark ? Color.FromRgb(242,244,247) : Color.FromRgb(35,42,50));
+        var foreground = Theme.Foreground;
         Foreground = foreground; FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
         var stack = new StackPanel { Margin = new Thickness(6) };
         var heading = new StackPanel { Margin = new Thickness(12,9,12,10) };
         heading.Children.Add(new TextBlock { Text = "额度环", FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = foreground });
         heading.Children.Add(new TextBlock { Text = "每 60 秒自动刷新", FontSize = 11, Opacity = .6, Margin = new Thickness(0,3,0,0), Foreground = foreground });
         stack.Children.Add(heading);
-        string hover = dark ? "#20FFFFFF" : "#10000000";
-        var template = (ControlTemplate)XamlReader.Parse($"""
+        var template = (ControlTemplate)XamlReader.Parse("""
         <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
           <Border x:Name="tile" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" CornerRadius="6" Background="Transparent" Padding="10,7">
             <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="tile" Property="Background" Value="{hover}"/></Trigger>
-            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="tile" Property="Background" Value="{hover}"/></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="tile" Property="Background" Value="{DynamicResource ThemeHover}"/></Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="tile" Property="Background" Value="{DynamicResource ThemeHover}"/></Trigger>
             <Trigger Property="IsPressed" Value="True"><Setter TargetName="tile" Property="Opacity" Value="0.65"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -84,14 +85,15 @@ public sealed class MicaMenu : Window
             int current = index++;
             bool chosen = current == (selected == "week" ? 1 : selected == "5h" ? 2 : 3);
             var row = new Grid(); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(25) }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-            row.Children.Add(new TextBlock { Text = icons[current], FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Foreground = foreground });
+            row.Children.Add(new TextBlock { Text = item.Header.ToString()!.StartsWith("主题：") ? "◐" : item.Header.ToString() == "退出额度环" ? "⏻" : icons[Math.Min(current, icons.Length-1)], FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Foreground = foreground });
             var label = new TextBlock { Text = item.Header.ToString()!.Replace("中间显示：", "").Replace("位置向", "向"), VerticalAlignment = VerticalAlignment.Center, Foreground = foreground }; Grid.SetColumn(label,1); row.Children.Add(label);
-            if (chosen) { var check = new TextBlock { Text = "✓", Foreground = new SolidColorBrush(Color.FromRgb(32,167,122)), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(check,2); row.Children.Add(check); }
+            if (item.Header.ToString() == (Theme.Mode == "dark" ? "主题：深色" : Theme.Mode == "light" ? "主题：浅色" : "主题：跟随系统")) chosen = true;
+            if (chosen) { var check = new TextBlock { Text = "✓", Foreground = Theme.Week, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(check,2); row.Children.Add(check); }
             var button = new Button { Content = row, Template = template, Margin = new Thickness(0,1,0,1), HorizontalContentAlignment = HorizontalAlignment.Stretch, ToolTip = item.Header };
             button.Click += (_, _) => { Close(); item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, item)); };
             stack.Children.Add(button);
         }
-        surface = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(28,255,255,255) : Color.FromArgb(25,0,0,0)), Background = Brushes.Transparent, Child = stack };
+        surface = new Border { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = Theme.Border, Background = Brushes.Transparent, Child = stack };
         Content = surface;
         SourceInitialized += (_, _) =>
         {
@@ -100,10 +102,19 @@ public sealed class MicaMenu : Window
             int corners = 2, theme = dark ? 1 : 0, mica = 2;
             DwmSetWindowAttribute(h, 33, ref corners, 4); DwmSetWindowAttribute(h, 20, ref theme, 4);
             int result = DwmSetWindowAttribute(h, 38, ref mica, 4);
-            if (result != 0) surface.Background = new SolidColorBrush(dark ? Color.FromRgb(35,38,43) : Color.FromRgb(244,247,250));
+            micaAvailable = result == 0;
+            ApplyTheme();
         };
+        Theme.Changed += ApplyTheme;
+        Closed += (_, _) => Theme.Changed -= ApplyTheme;
         Deactivated += (_, _) => { if (!passive) Close(); };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
+    }
+    void ApplyTheme()
+    {
+        var h = new WindowInteropHelper(this).Handle;
+        if (h != IntPtr.Zero) { int theme = dark ? 1 : 0; DwmSetWindowAttribute(h, 20, ref theme, 4); }
+        surface.Background = micaAvailable ? Brushes.Transparent : Theme.Surface;
     }
     public void OpenAt(Point anchor)
     {

@@ -6,6 +6,35 @@ using System.Windows.Media.Imaging;
 namespace CodexQuotaRing;
 static class Gallery
 {
+    public static void RenderThemes()
+    {
+        _ = new Application();
+        foreach (string mode in new[] { "light", "dark" })
+        {
+            Theme.Mode = mode; Theme.Refresh(true);
+            var canvas = new Canvas { Width = 680, Height = 590, Background = Theme.Surface };
+            void Place(UIElement item, double x, double y) { Canvas.SetLeft(item,x); Canvas.SetTop(item,y); canvas.Children.Add(item); }
+            Place(new RingVisual { Width = 76, Height = 76, Week = 54, Five = 82, Label = "54%" }, 35, 25);
+            var details = new MicaMenu(RingWindow.BuildDetails(new(new(54,0),new(82,0)),false,"主题预览",DateTime.Now));
+            var commands = new ContextMenu();
+            foreach (var label in new[] { "立即刷新", "中间显示：每周剩余", "中间显示：5 小时剩余", "中间显示：较低余额", "主题：跟随系统", "主题：浅色", "主题：深色", "退出额度环" }) commands.Items.Add(new MenuItem { Header = label });
+            var menu = new MicaMenu(commands,"min");
+            void Card(MicaMenu window, double x, double y, double width)
+            {
+                var content = (Border)window.Content;
+                window.Content = null; content.Width = width;
+                System.Windows.Documents.TextElement.SetForeground(content,Theme.Foreground);
+                content.Background = Theme.Surface;
+                Place(content,x,y);
+            }
+            Card(details,25,135,300); Card(menu,355,25,300);
+            canvas.Measure(new Size(680,590)); canvas.Arrange(new Rect(0,0,680,590)); canvas.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(680,590,96,96,PixelFormats.Pbgra32); bitmap.Render(canvas);
+            var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(AppContext.BaseDirectory,$"theme-{mode}.png")); png.Save(file);
+            details.Close(); menu.Close();
+        }
+    }
     public static void Render()
     {
         _ = new Application();

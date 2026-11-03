@@ -17,11 +17,13 @@ public class Settings
     public double Bottom { get; set; } = 24;
     public double Size { get; set; } = 38;
     public string Center { get; set; } = "min";
+    public string Appearance { get; set; } = "system";
 }
 public static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if (args.Contains("--theme-preview")) { Gallery.RenderThemes(); return; }
         if (args.Contains("--watch"))
         {
             using var watcher = new Mutex(true, "Local\\CodexQuotaRing.Watcher.v1", out bool firstWatcher);
@@ -115,6 +117,7 @@ public class RingWindow : Window
         try { settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(config)) ?? new(); } catch { settings = new(); }
         // Migrate the old default only; preserve deliberately customized positions.
         if (settings.CenterX == 32 && settings.Bottom == 68) { settings.CenterX = 80; settings.Bottom = 24; }
+        Theme.Mode = settings.Appearance; Theme.Refresh(true);
         settings.Size = Math.Clamp(settings.Size, 32, 56);
         Title = "Codex 额度环"; Width = Height = settings.Size;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true;
@@ -132,6 +135,11 @@ public class RingWindow : Window
         Add("位置向左微调", () => { settings.CenterX -= 2; Save(); });
         Add("位置向右微调", () => { settings.CenterX += 2; Save(); });
         Add("恢复默认位置", () => { settings.CenterX = 80; settings.Bottom = 24; Save(); });
+        menu.Items.Add(new Separator());
+        void Appearance(string label, string mode) => Add(label, () => { settings.Appearance = mode; Theme.Mode = mode; Theme.Refresh(true); Save(); });
+        Appearance("主题：跟随系统", "system");
+        Appearance("主题：浅色", "light");
+        Appearance("主题：深色", "dark");
         menu.Items.Add(new Separator()); Add("退出额度环", () => { Environment.ExitCode = 42; cancel.Cancel(); timer.Stop(); Close(); Application.Current.Shutdown(42); });
         visual.MouseRightButtonUp += (_, e) =>
         {
@@ -254,6 +262,7 @@ public class RingWindow : Window
     }
     void Render()
     {
+        Theme.Refresh();
         var center = settings.Center == "week" ? quota.Week?.Remaining : settings.Center == "5h" ? quota.FiveHour?.Remaining : quota.Week == null ? quota.FiveHour?.Remaining : quota.FiveHour == null ? quota.Week.Remaining : Math.Min(quota.Week.Remaining, quota.FiveHour.Remaining);
         visual.Week = quota.Week?.Remaining; visual.Five = quota.FiveHour?.Remaining;
         visual.Label = center.HasValue ? Math.Floor(center.Value).ToString("0") + "%" : "--";
@@ -269,17 +278,17 @@ public class RingWindow : Window
     {
         var panel = new StackPanel { Margin = new Thickness(18,15,18,14) };
         panel.Children.Add(new TextBlock { Text = "剩余额度", FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0,0,0,14) });
-        void AddLimit(string name, Limit? limit, string color)
+        void AddLimit(string name, Limit? limit, Brush color)
         {
             var row = new Grid { Margin = new Thickness(0,0,0,4) };
             row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = "●  " + name, Foreground = (Brush)new BrushConverter().ConvertFromString(color)!, VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(new TextBlock { Text = "●  " + name, Foreground = color, VerticalAlignment = VerticalAlignment.Center });
             var number = new TextBlock { Text = limit == null ? "未提供" : limit.Remaining.ToString("0.#") + "%", FontSize = limit == null ? 13 : 20, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(number,1); row.Children.Add(number); panel.Children.Add(row);
             string reset = "服务端暂未返回此项额度";
             if (limit != null) { reset = "重置时间未提供"; try { if (limit.Reset > 0) reset = DateTimeOffset.FromUnixTimeSeconds(limit.Reset).LocalDateTime.ToString("M/d HH:mm") + " 重置"; } catch { } }
             panel.Children.Add(new TextBlock { Text = reset, FontSize = 11, Opacity = .6, Margin = new Thickness(15,0,0,13) });
         }
-        AddLimit("每周 · 外环", quota.Week, "#20A77A"); AddLimit("5 小时 · 内环", quota.FiveHour, "#478CE8");
+        AddLimit("每周 · 外环", quota.Week, Theme.Week); AddLimit("5 小时 · 内环", quota.FiveHour, Theme.Five);
         panel.Children.Add(new Border { Height = 1, Background = Brushes.Gray, Opacity = .2, Margin = new Thickness(0,0,0,10) });
         panel.Children.Add(new TextBlock { Text = (stale ? "旧数据 · " : "") + (error.Length > 0 ? error : "更新于 " + updated.ToString("HH:mm:ss") + " · 每 60 秒刷新"), FontSize = 11, Opacity = .65, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(new TextBlock { Text = "左键拖动位置 · 右键设置", FontSize = 11, Opacity = .5, Margin = new Thickness(0,4,0,0) });
@@ -296,12 +305,12 @@ public class RingVisual : FrameworkElement
     {
         double size = Math.Min(ActualWidth, ActualHeight), c = size / 2;
         dc.DrawEllipse(Brushes.Transparent, null, new(c,c), c,c);
-        void Ring(double radius, double? value, string color)
+        void Ring(double radius, double? value, Brush color)
         {
-            var track = new Pen(new SolidColorBrush(Color.FromArgb(55, 130, 145, 155)), 2.6);
+            var track = new Pen(Theme.Track, 2.6);
             dc.DrawEllipse(null, track, new(c,c), radius, radius);
             if (value is not > 0) return;
-            var brush = (Brush)new BrushConverter().ConvertFromString(Stale ? "#A5AAB0" : color)!;
+            var brush = Stale ? Brushes.Gray : color;
             var pen = new Pen(brush, 2.6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
             if (value >= 99.999) { dc.DrawEllipse(null, pen, new(c,c), radius,radius); return; }
             double angle = value.Value / 100 * Math.PI * 2;
@@ -309,10 +318,10 @@ public class RingVisual : FrameworkElement
             using (var ctx = geometry.Open()) { ctx.BeginFigure(new(c, c-radius), false, false); ctx.ArcTo(new(c+radius*Math.Sin(angle), c-radius*Math.Cos(angle)), new(radius,radius), 0, angle > Math.PI, SweepDirection.Clockwise, true,false); }
             dc.DrawGeometry(null,pen,geometry);
         }
-        Ring(c-2.5, Week, "#20A77A"); Ring(c-7, Five, "#478CE8");
+        Ring(c-2.5, Week, Theme.Week); Ring(c-7, Five, Theme.Five);
         // A tiny neutral center keeps the number readable in both app themes.
-        dc.DrawEllipse(new SolidColorBrush(Color.FromRgb(240,245,248)), null, new(c,c), c-10, c-10);
-        var text = new FormattedText(Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI Semibold"), Label.Length > 3 ? 8.5 : 10, new SolidColorBrush(Color.FromRgb(46,60,69)), VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        dc.DrawEllipse(Theme.Surface, null, new(c,c), c-10, c-10);
+        var text = new FormattedText(Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI Semibold"), Label.Length > 3 ? 8.5 : 10, Theme.Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         dc.DrawText(text, new(c-text.Width/2,c-text.Height/2));
         if (Stale) dc.DrawEllipse(Brushes.Orange, null, new(size-3,3),2.5,2.5);
     }
